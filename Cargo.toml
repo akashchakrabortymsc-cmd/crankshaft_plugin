@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/plugin-core",
+    "crates/plugin-protocol",
+    "crates/plugin-host",
+    "crates/plugin-sdk",
+    "crates/plugin-example"
+]
