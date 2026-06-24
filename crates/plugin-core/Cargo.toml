@@ -2,5 +2,15 @@
 name = "plugin-core"
 version = "0.1.0"
 edition = "2024"
+authors = ["Your Name <you@example.com>"]
+description = "Shared types and contracts for the Crankshaft plugin system"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourname/crankshaft-plugin-system"
 
 [dependencies]
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+thiserror = "2.0"
+tokio = { version = "1", features = ["time"] }
