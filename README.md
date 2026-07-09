@@ -1,8 +1,8 @@
-# crankshaft_plugin
+# crankshaft-plugin
 
 A production-oriented plugin architecture for [Crankshaft](https://github.com/stjude-rust-labs/crankshaft) that enables external execution backends to be developed, distributed, and maintained independently from the core engine.
 
-> **Status:** 🚧 Early Development in progress.
+> **Status:** 🚧 Early Development — Part 1 (`plugin-core`) in progress.
 
 ---
 
@@ -214,6 +214,18 @@ Plugin Host (loop every N seconds)
 
 ---
 
+## Development Roadmap
+
+| Phase | Crate | Status |
+|---|---|---|
+| 1 | `plugin-core` | 🔄 In Progress |
+| 2 | `plugin-host` | ⬜ Not Started |
+| 3 | `plugin-sdk` |  ⬜ Not Started |
+| 4 | `plugin-example` |  ⬜ Not Started |
+| 5 | Crankshaft config integration | ⬜ Not Started |
+| 6 | Failure handling + observability |  ⬜ Not Started |
+
+---
 
 ## Design Principles
 
@@ -228,7 +240,6 @@ Plugin Host (loop every N seconds)
 **Stability** — JSON-RPC message schema is versioned. Host and plugin can be updated independently.
 
 ---
-
 
 
 Built with direct reference to the [Crankshaft](https://github.com/stjude-rust-labs/crankshaft) and [Sprocket](https://github.com/stjude-rust-labs/sprocket) codebases maintained by St. Jude Rust Labs.
