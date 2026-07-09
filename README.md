@@ -1,617 +1,240 @@
-# Crankshaft Plugin System (Rust)
+# crankshaft_plugin
 
-<<<<<<< HEAD
-> A production-oriented plugin architecture for Crankshaft that enables external execution backends to be developed, distributed, and maintained independently from the core engine.
+A production-oriented plugin architecture for [Crankshaft](https://github.com/stjude-rust-labs/crankshaft) that enables external execution backends to be developed, distributed, and maintained independently from the core engine.
 
----
-=======
-A production-oriented plugin architecture for Crankshaft that enables external execution backends to be developed, distributed, and maintained independently from the core engine.
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-
-## Vision
-
-Crankshaft currently supports built-in execution backends such as Docker, Slurm, and other HPC systems.
-
-This project introduces a generic plugin framework that allows new execution backends to be added without modifying Crankshaft itself.
-
-Instead of compiling every backend into the engine, Crankshaft will communicate with external plugins through a stable RPC interface.
-
-The long-term goal is:
-
-- Extensible backend ecosystem
-- Independent plugin development
-- Stable versioned interfaces
-- Fault isolation
-- Production-grade reliability
-
-Inspired by:
-
-- Nextflow Plugin System
-- PF4J
-<<<<<<< HEAD
-- Hashicorp Plugin Framework
-- Language Server Protocol (LSP)
+> **Status:** 🚧 Early Development in progress.
 
 ---
 
-# Architecture Overview
+## The Problem
 
-```text
-=======
-- HashiCorp Plugin Framework
-- Language Server Protocol (LSP)
+Crankshaft currently supports a fixed set of execution backends: Docker, Slurm, LSF, and TES.
 
-## Architecture Overview
+Every organisation that needs a custom backend — a private Kubernetes cluster, a proprietary HPC scheduler, a cloud-burst environment — must either fork Crankshaft or wait for an upstream release.
+
+This project removes that constraint.
+
+---
+
+## The Solution
+
+A subprocess-based plugin system where:
+
+- Crankshaft spawns an external plugin binary at runtime
+- Host and plugin communicate via JSON-RPC over TCP
+- Plugin authors implement a single Rust trait
+- A plugin crash **never** crashes the engine
 
 ```
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-                    USER
-                      │
-                      ▼
-                 config.toml
-                      │
-                      ▼
-                 CRANKSHAFT
-              Workflow Engine
-                      │
-                      ▼
-               Backend Factory
-                      │
-      ┌───────────────┼────────────────┐
-      │               │                │
-      ▼               ▼                ▼
- DockerBackend  SlurmBackend  PluginBackend
-                                     │
-                                     ▼
-                               Plugin Host
-                                     │
-                            JSON-RPC over TCP
-                                     │
-            ┌────────────────────────┴─────────────────────┐
-            │                                              │
-            ▼                                              ▼
-      Kubernetes Plugin                           Custom HPC Plugin
-            │                                              │
-            ▼                                              ▼
-      Real Compute Resources                      Real Compute Resources
-```
-
-<<<<<<< HEAD
----
-
-# Core Design Principles
-
-## 1. Extensibility
-
-New backends should be installable without modifying Crankshaft source code.
-
-## 2. Isolation
-
-A plugin crash should never crash the engine.
-
-## 3. Simplicity
-
-Plugin authors should only implement a small Rust trait.
-
-## 4. Reliability
-
-State persistence, crash recovery, retries, and health checks are built into the system.
-
-## 5. Versioning
-
-Host and plugins communicate through stable interfaces.
-
----
-
-# Project Structure
-
-```text
-crankshaft-plugin-system/
-│
-├── crankshaft-plugin-core
-│
-├── crankshaft-plugin-host
-│
-├── crankshaft-plugin-sdk
-│
-├── crankshaft-plugin-example
-│
-└── docs
+                        USER
+                          │
+                          ▼
+                     config.toml
+                          │
+                          ▼
+                     CRANKSHAFT
+                  Workflow Engine
+                          │
+                          ▼
+                   Backend Factory
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+         ▼                ▼                ▼
+   DockerBackend    SlurmBackend    PluginBackend
+                                          │
+                                          ▼
+                                    Plugin Host
+                                          │
+                               JSON-RPC over TCP
+                                          │
+               ┌──────────────────────────┴──────────────────────┐
+               │                                                  │
+               ▼                                                  ▼
+       Kubernetes Plugin                               Custom HPC Plugin
+               │                                                  │
+               ▼                                                  ▼
+       Real Compute Resources                          Real Compute Resources
 ```
 
 ---
 
-# Crates
-
-## crankshaft-plugin-core
-
-Shared contracts between the host and plugins.
-
-### Responsibilities
-
-=======
-## Core Design Principles
-
-1. **Extensibility** — New backends should be installable without modifying Crankshaft source code.
-2. **Isolation** — A plugin crash should never crash the engine.
-3. **Simplicity** — Plugin authors should only implement a small Rust trait.
-4. **Reliability** — State persistence, crash recovery, retries, and health checks are built into the system.
-5. **Versioning** — Host and plugins communicate through stable interfaces.
-
-## Project Structure
+## Workspace Structure
 
 ```
-crankshaft-plugin-system/
+crankshaft-plugin/
 │
-├── crankshaft-plugin-core
-├── crankshaft-plugin-host
-├── crankshaft-plugin-sdk
-├── crankshaft-plugin-example
-└── docs
+├── crates/
+│   ├── plugin-core        # Shared types, traits, and errors
+│   ├── plugin-host        # Engine-side: spawns plugins, manages RPC
+│   ├── plugin-sdk         # Plugin-author toolkit
+│   └── plugin-example     # Reference implementation
+│
+├── Cargo.toml             # Workspace root
+└── README.md
 ```
+
+---
 
 ## Crates
 
-### crankshaft-plugin-core
+### `plugin-core`
 
-Shared contracts between the host and plugins.
+Shared contracts used by both the engine and plugin authors.
 
-**Responsibilities**
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-- Job types
-- Status types
-- Error handling
-- Shared traits
-- RPC message definitions
-
-<<<<<<< HEAD
-### Example
+Provides:
+- `JobId` — unique job identifier (newtype over `String`)
+- `Job` — unit of work sent to a plugin
+- `JobStatus` — `Pending | Running | Completed | Failed(String) | Cancelled`
+- `Resources` — CPU, memory, GPU requirements
+- `PluginHandler` — the async trait every plugin must implement
+- `PluginError` — typed error enum
+- `PluginResult<T>` — type alias for `Result<T, PluginError>`
 
 ```rust
-pub trait PluginBackend {
-    async fn submit(&self, job: Job)
-        -> PluginResult<JobId>;
-
-    async fn status(&self, id: JobId)
-        -> PluginResult<JobStatus>;
-
-    async fn cancel(&self, id: JobId)
-        -> PluginResult<()>;
-}
-```
-
----
-
-## crankshaft-plugin-host
-=======
-**Example**
-
-Native `async fn` in traits isn't object-safe yet, and `PluginBackend` needs to be stored as a `dyn` trait object inside the Backend Factory (alongside `DockerBackend` and `SlurmBackend`), so the trait is defined with `async-trait`:
-
-```rust
-use async_trait::async_trait;
-
 #[async_trait]
-pub trait PluginBackend: Send + Sync {
+pub trait PluginHandler: Send + Sync + 'static {
     async fn submit(&self, job: Job) -> PluginResult<JobId>;
     async fn status(&self, id: JobId) -> PluginResult<JobStatus>;
     async fn cancel(&self, id: JobId) -> PluginResult<()>;
+    async fn health_check(&self) -> PluginResult<()> { Ok(()) }
 }
 ```
 
-### crankshaft-plugin-host
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-
-Runs inside the engine.
-
-Responsible for:
-<<<<<<< HEAD
-
-=======
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-- Spawning plugins
-- Managing plugin lifecycle
-- Sending RPC requests
-- Receiving responses
-- Retry logic
-- Health checks
-- State recovery
-
-<<<<<<< HEAD
 ---
 
-## crankshaft-plugin-sdk
+### `plugin-host`
 
-Plugin author toolkit.
+Runs inside the Crankshaft engine process.
 
-Allows backend authors to build a plugin with minimal code.
+Responsibilities:
+- Spawn the plugin binary as a child process (`tokio::process::Command`)
+- Manage plugin lifecycle (`kill_on_drop`, restart on crash)
+- Send and receive JSON-RPC messages over TCP
+- Poll job status and forward events to the engine
+- Health check loop every 60 seconds
+- State persistence and recovery
 
-Example:
+---
+
+### `plugin-sdk`
+
+Toolkit for plugin authors. Hides all TCP and JSON-RPC boilerplate.
+
+A complete plugin in ~20 lines:
 
 ```rust
-struct MyHandler;
+use crankshaft_plugin_sdk::prelude::*;
 
-impl PluginHandler for MyHandler {
-    async fn execute(
-        &self,
-        job: Job,
-    ) -> PluginResult<JobId> {
-=======
-### crankshaft-plugin-sdk
-
-Plugin author toolkit. Allows backend authors to build a plugin with minimal code.
-
-```rust
-use async_trait::async_trait;
-
-struct MyHandler;
+struct MyBackend;
 
 #[async_trait]
-impl PluginHandler for MyHandler {
-    async fn execute(&self, job: Job) -> PluginResult<JobId> {
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-        todo!()
+impl PluginHandler for MyBackend {
+    async fn submit(&self, job: Job) -> PluginResult<JobId> {
+        // submit to your backend here
+        Ok(JobId::new("job-001"))
+    }
+
+    async fn status(&self, id: JobId) -> PluginResult<JobStatus> {
+        Ok(JobStatus::Completed)
+    }
+
+    async fn cancel(&self, id: JobId) -> PluginResult<()> {
+        Ok(())
     }
 }
-```
 
-<<<<<<< HEAD
----
-
-## crankshaft-plugin-example
-
-Reference implementation.
-
-Provides:
-
-=======
-### crankshaft-plugin-example
-
-Reference implementation. Provides:
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-- Working plugin
-- Example job execution
-- Integration tests
-- Documentation
-
-<<<<<<< HEAD
----
-
-# Runtime Flow
-
-## Job Submission
-
-```text
-User
- │
- ▼
-Crankshaft
- │
- ▼
-PluginBackend.submit()
- │
- ▼
-Plugin Host
- │
- ▼
-JSON-RPC Request
- │
- ▼
-Plugin Server
- │
- ▼
-PluginHandler.execute()
- │
- ▼
-Compute Backend
- │
- ▼
-JobId Returned
+plugin_main!(MyBackend);
 ```
 
 ---
 
-## Status Polling
+### `plugin-example`
 
-```text
-Crankshaft
-     │
-     ▼
-status(job_id)
-     │
-     ▼
-Plugin Host
-     │
-     ▼
-RPC Request
-     │
-     ▼
-Plugin
-     │
-     ▼
-Job Status
-     │
-     ▼
-Completed
-```
+Reference implementation using local shell execution.
+
+- Runs jobs via `std::process::Command`
+- Captures stdout and stderr
+- Tracks job state in memory
+- Full end-to-end test with the plugin host
 
 ---
-
-# Configuration
-
-Example:
-=======
-## Runtime Flow
-
-**Job Submission**
-
-```
-User → Crankshaft → PluginBackend.submit() → Plugin Host
-     → JSON-RPC Request → Plugin Server → PluginHandler.execute()
-     → Compute Backend → JobId Returned
-```
-
-**Status Polling**
-
-```
-Crankshaft → status(job_id) → Plugin Host → RPC Request
-          → Plugin → Job Status → Completed
-```
 
 ## Configuration
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
 
 ```toml
 [backend]
 type = "plugin"
 
 [backend.plugin]
-path = "/plugins/kubernetes-plugin"
-port = 7878
+path   = "/path/to/my-backend-plugin"
+port   = 7878
 timeout_secs = 30
 ```
 
-<<<<<<< HEAD
 ---
 
-# Reliability Features
+## Runtime Flow
 
-## Crash Detection
-
-The host continuously monitors plugin processes.
-
-If a plugin crashes:
-
-=======
-## Reliability Features
-
-**Crash Detection**
-
-The host continuously monitors plugin processes. If a plugin crashes:
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-- Jobs are marked failed
-- Error is logged
-- Recovery process starts
-
-<<<<<<< HEAD
----
-
-## Auto Restart
-
-```text
-Plugin Crash
-      │
-      ▼
-Restart Attempt #1
-      │
-      ▼
-Restart Attempt #2
-      │
-      ▼
-Restart Attempt #3
-=======
-**Auto Restart**
+**Job Submission**
 
 ```
-Plugin Crash → Restart Attempt #1 → Restart Attempt #2 → Restart Attempt #3
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
+User
+ └─▶ Crankshaft
+       └─▶ PluginBackend::submit()
+             └─▶ Plugin Host
+                   └─▶ JSON-RPC: submit { job }
+                         └─▶ Plugin Process
+                               └─▶ PluginHandler::submit()
+                                     └─▶ Returns JobId
 ```
 
-After maximum retries the plugin is permanently marked unhealthy.
+**Status Polling**
 
-<<<<<<< HEAD
----
-
-## State Persistence
-
-Job state is stored on disk.
-
-```text
-~/.crankshaft/plugin-state.json
+```
+Plugin Host (loop every N seconds)
+ └─▶ JSON-RPC: status { job_id }
+       └─▶ Plugin Process
+             └─▶ Returns JobStatus
+                   └─▶ Completed / Failed → exit loop
 ```
 
-Benefits:
-
-=======
-**State Persistence**
-
-Job state is stored on disk at `~/.crankshaft/plugin-state.json`.
-
-Benefits:
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-- Engine restart recovery
-- Resume monitoring
-- Failure recovery
-
-<<<<<<< HEAD
 ---
 
-## Health Checks
-=======
-**Health Checks**
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
+## Reliability
 
-Host periodically sends:
-
-```json
-<<<<<<< HEAD
-{
-  "method": "health_check"
-}
-```
-
-If no response is received:
-
-- Plugin considered unhealthy
-- Automatic restart triggered
+| Feature | Description |
+|---|---|
+| Process isolation | Plugin crash never affects the engine |
+| Auto-restart | Up to 3 restart attempts with exponential backoff |
+| Health checks | Ping every 60s; stuck plugin triggers restart |
+| State persistence | Job state written to `~/.crankshaft/plugin-state.json` |
+| Startup retry | 5 TCP connection attempts with 500ms delay |
+| Structured logging | `tracing` crate throughout — `info`, `warn`, `error`, `debug` |
 
 ---
 
-# Future Extension Points
 
-The architecture is intentionally designed to support future plugin categories.
+## Design Principles
 
-Potential extensions:
-=======
-{ "method": "health_check" }
-```
+**Extensibility** — New backends ship as independent binaries. No Crankshaft fork required.
 
-If no response is received, the plugin is considered unhealthy and an automatic restart is triggered.
+**Isolation** — Subprocess boundary means a plugin crash cannot corrupt the engine.
 
-## Future Extension Points
+**Simplicity** — Plugin authors implement one trait and call `plugin_main!`. Everything else is handled.
 
-The architecture is intentionally designed to support future plugin categories:
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
+**Reliability** — Crash recovery, state persistence, and health checks are built into the host, not left to plugin authors.
 
-- Execution Backends
-- Storage Providers
-- Authentication Providers
-- Metrics Exporters
-- Workflow Extensions
-- Scheduling Policies
-
-<<<<<<< HEAD
----
-
-# Development Roadmap
-
-## Phase 1
-
-plugin-core
-
-- Job types
-- Status types
-- Traits
-- Errors
-
-## Phase 2
-
-plugin-host
-
-- TCP communication
-- JSON-RPC
-- Process management
-
-## Phase 3
-
-plugin-sdk
-
-- PluginServer
-- PluginHandler
-- Configuration helpers
-
-## Phase 4
-
-Reference plugin
-
-- Local execution backend
-- End-to-end validation
-
-## Phase 5
-
-Crankshaft integration
-
-- Config support
-- Backend registration
-
-## Phase 6
-
-Production reliability
-
-- Logging
-- Persistence
-- Recovery
-- Chaos testing
+**Stability** — JSON-RPC message schema is versioned. Host and plugin can be updated independently.
 
 ---
 
-# Learning Objectives
 
-This project explores:
 
-=======
-## Development Roadmap
-
-| Phase | Crate | Focus |
-|---|---|---|
-| 1 | plugin-core | Job types, status types, traits, errors |
-| 2 | plugin-host | TCP communication, JSON-RPC, process management |
-| 3 | plugin-sdk | PluginServer, PluginHandler, config helpers |
-| 4 | plugin-example | Local execution backend, end-to-end validation |
-| 5 | Crankshaft integration | Config support, backend registration |
-| 6 | Production reliability | Logging, persistence, recovery, chaos testing |
-
-## Learning Objectives
-
-This project explores:
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
-- Rust async programming
-- Tokio
-- Distributed systems
-- RPC design
-- Plugin architectures
-- Process management
-- Reliability engineering
-- Workflow execution engines
-
-<<<<<<< HEAD
----
-
-# Status
-
-🚧 Early Development
-
-Currently building the foundational architecture and validating concepts through a toy implementation before integration with Crankshaft.
+Built with direct reference to the [Crankshaft](https://github.com/stjude-rust-labs/crankshaft) and [Sprocket](https://github.com/stjude-rust-labs/sprocket) codebases maintained by St. Jude Rust Labs.
 
 ---
-
-# Acknowledgements
-
-Inspired by:
-
-- Nextflow Plugin System
-- Hashicorp Plugin Framework
-- PF4J
-- Crankshaft
-- Sprocket
-
-Special thanks to the Crankshaft maintainers for guidance and feedback during the learning process.
-
----
-
-# License
-=======
-## Status
-
-🚧 **Early Development**
-
-Building the foundational architecture and validating concepts through an independent toy implementation, with the goal of eventually proposing it for integration into Crankshaft.
-
-## Acknowledgements
-
-Inspired by the Nextflow Plugin System, the HashiCorp Plugin Framework, and PF4J. Built with direct reference to the existing Crankshaft and Sprocket codebases maintained by St. Jude Rust Labs.
 
 ## License
->>>>>>> bd78bbc387b79fe981cfb97c269a1e2cb4f22282
 
 MIT OR Apache-2.0
