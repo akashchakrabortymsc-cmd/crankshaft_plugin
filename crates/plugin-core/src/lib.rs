@@ -10,12 +10,17 @@ use serde::{Deserialize, Serialize};
 // ─── JobId ─────
 /// A unique identifier for a submitted job.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct JobId(pub String);
+pub struct JobId(String);
 
 impl JobId {
     /// Creates a new JobId.
     pub fn new(id: impl Into<String>) -> Self {
         JobId(id.into())
+    }
+
+    /// Borrows the inner string.
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
