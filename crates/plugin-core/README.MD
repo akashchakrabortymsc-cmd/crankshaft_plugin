@@ -92,15 +92,3 @@ is not yet `dyn`-compatible in stable Rust. `health_check` has a default
 implementation returning `Ok(())` so existing plugins do not break when the
 host adds health check support.
 
-### What is not yet decided
-
-Whether the host-side contract (used for `Box<dyn ...>` dispatch alongside
-Crankshaft's existing Docker and Slurm backends) should be a separate trait
-from `PluginHandler`, mirroring the host/SDK split in the rest of the
-roadmap. Current leaning: keep one trait, let the SDK wrap it.
-
-### Next
-
-`plugin-host` — TCP listener, JSON-RPC message handling, process spawn
-via `tokio::process::Command` with `kill_on_drop`, and the status polling
-loop.
