@@ -31,3 +31,87 @@ impl JobStatus {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pending_display() {
+        assert_eq!(JobStatus::Pending.to_string(), "Pending");
+    }
+
+    #[test]
+    fn test_running_display() {
+        assert_eq!(JobStatus::Running.to_string(), "Running");
+    }
+
+    #[test]
+    fn test_completed_display() {
+        assert_eq!(JobStatus::Completed.to_string(), "Completed");
+    }
+
+    #[test]
+    fn test_failed_display() {
+        let s = JobStatus::Failed("out of memory".into());
+        assert_eq!(s.to_string(), "Failed: out of memory");
+    }
+
+    #[test]
+    fn test_cancelled_display() {
+        assert_eq!(JobStatus::Cancelled.to_string(), "Cancelled");
+    }
+
+    #[test]
+    fn test_is_terminal_completed() {
+        assert!(JobStatus::Completed.is_terminal());
+    }
+
+    #[test]
+    fn test_is_terminal_failed() {
+        assert!(JobStatus::Failed("err".into()).is_terminal());
+    }
+
+    #[test]
+    fn test_is_terminal_cancelled() {
+        assert!(JobStatus::Cancelled.is_terminal());
+    }
+
+    #[test]
+    fn test_is_not_terminal_pending() {
+        assert!(!JobStatus::Pending.is_terminal());
+    }
+
+    #[test]
+    fn test_is_not_terminal_running() {
+        assert!(!JobStatus::Running.is_terminal());
+    }
+
+    #[test]
+    fn test_equality() {
+        assert_eq!(JobStatus::Pending, JobStatus::Pending);
+        assert_eq!(
+            JobStatus::Failed("x".into()),
+            JobStatus::Failed("x".into())
+        );
+        assert_ne!(
+            JobStatus::Failed("x".into()),
+            JobStatus::Failed("y".into())
+        );
+    }
+
+    #[test]
+    fn test_serialization() {
+        let status = JobStatus::Failed("disk full".into());
+        let json = serde_json::to_string(&status).expect("serialize failed");
+        let back: JobStatus = serde_json::from_str(&json).expect("deserialize failed");
+        assert_eq!(status, back);
+    }
+
+    #[test]
+    fn test_clone() {
+        let a = JobStatus::Running;
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+}
