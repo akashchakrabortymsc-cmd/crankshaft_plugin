@@ -8,7 +8,7 @@ A production-oriented plugin architecture for [Crankshaft](https://github.com/st
 
 ## The Problem
 
-Crankshaft currently supports a fixed set of execution backends: Docker, Slurm, LSF, and TES.
+Crankshaft currently supports a fixed set of execution backends: Docker, Slurm.
 
 Every organisation that needs a custom backend — a private Kubernetes cluster, a proprietary HPC scheduler, a cloud-burst environment — must either fork Crankshaft or wait for an upstream release.
 
