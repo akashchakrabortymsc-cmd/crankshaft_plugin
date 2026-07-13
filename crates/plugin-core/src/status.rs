@@ -90,14 +90,8 @@ mod tests {
     #[test]
     fn test_equality() {
         assert_eq!(JobStatus::Pending, JobStatus::Pending);
-        assert_eq!(
-            JobStatus::Failed("x".into()),
-            JobStatus::Failed("x".into())
-        );
-        assert_ne!(
-            JobStatus::Failed("x".into()),
-            JobStatus::Failed("y".into())
-        );
+        assert_eq!(JobStatus::Failed("x".into()), JobStatus::Failed("x".into()));
+        assert_ne!(JobStatus::Failed("x".into()), JobStatus::Failed("y".into()));
     }
 
     #[test]
