@@ -20,7 +20,7 @@ pub trait PluginHandler: Send + Sync + 'static {
 mod tests {
     use super::*;
     use crate::error::PluginError;
-    use crate::job::{Job, JobId};
+    use crate::job::{Job, JobExecution, JobId};
     use crate::status::JobStatus;
     use async_trait::async_trait;
 
@@ -32,7 +32,7 @@ mod tests {
             Ok(job.id)
         }
         async fn status(&self, _id: JobId) -> PluginResult<JobStatus> {
-            Ok(JobStatus::Completed)
+            Ok(JobStatus::Completed(vec![0]))
         }
         async fn cancel(&self, _id: JobId) -> PluginResult<()> {
             Ok(())
@@ -58,7 +58,7 @@ mod tests {
     async fn test_submit_returns_job_id() {
         let plugin = MockPlugin;
         let id = JobId::new("job-001");
-        let job = Job::new(id.clone(), "echo");
+        let job = Job::new(id.clone(), JobExecution::new("alpine:latest", "echo"));
         let result = plugin.submit(job).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), id);
@@ -70,7 +70,7 @@ mod tests {
         let id = JobId::new("job-001");
         let result = plugin.status(id).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), JobStatus::Completed);
+        assert_eq!(result.unwrap(), JobStatus::Completed(vec![0]));
     }
 
     #[tokio::test]
@@ -92,7 +92,7 @@ mod tests {
     async fn test_submit_connection_failed() {
         let plugin = FailingPlugin;
         let id = JobId::new("job-002");
-        let job = Job::new(id, "echo");
+        let job = Job::new(id, JobExecution::new("alpine:latest", "echo"));
         let result = plugin.submit(job).await;
         assert!(result.is_err());
         assert!(matches!(

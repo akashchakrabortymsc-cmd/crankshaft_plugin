@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 pub enum JobStatus {
     Pending,
     Running,
-    Completed,
+    /// One exit code per execution, in the same order as Job.executions.
+    Completed(Vec<i32>),
     Failed(String),
     Cancelled,
 }
@@ -15,7 +16,7 @@ impl std::fmt::Display for JobStatus {
         match self {
             JobStatus::Pending => write!(f, "Pending"),
             JobStatus::Running => write!(f, "Running"),
-            JobStatus::Completed => write!(f, "Completed"),
+            JobStatus::Completed(codes) => write!(f, "Completed: {:?}", codes),
             JobStatus::Failed(msg) => write!(f, "Failed: {}", msg),
             JobStatus::Cancelled => write!(f, "Cancelled"),
         }
@@ -27,7 +28,7 @@ impl JobStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled
+            JobStatus::Completed(_) | JobStatus::Failed(_) | JobStatus::Cancelled
         )
     }
 }
@@ -48,7 +49,14 @@ mod tests {
 
     #[test]
     fn test_completed_display() {
-        assert_eq!(JobStatus::Completed.to_string(), "Completed");
+        let s = JobStatus::Completed(vec![0]);
+        assert_eq!(s.to_string(), "Completed: [0]");
+    }
+
+    #[test]
+    fn test_completed_multi_execution_display() {
+        let s = JobStatus::Completed(vec![0, 0, 1]);
+        assert_eq!(s.to_string(), "Completed: [0, 0, 1]");
     }
 
     #[test]
@@ -64,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_is_terminal_completed() {
-        assert!(JobStatus::Completed.is_terminal());
+        assert!(JobStatus::Completed(vec![0]).is_terminal());
     }
 
     #[test]
@@ -90,6 +98,14 @@ mod tests {
     #[test]
     fn test_equality() {
         assert_eq!(JobStatus::Pending, JobStatus::Pending);
+        assert_eq!(
+            JobStatus::Completed(vec![0, 0]),
+            JobStatus::Completed(vec![0, 0])
+        );
+        assert_ne!(
+            JobStatus::Completed(vec![0]),
+            JobStatus::Completed(vec![1])
+        );
         assert_eq!(JobStatus::Failed("x".into()), JobStatus::Failed("x".into()));
         assert_ne!(JobStatus::Failed("x".into()), JobStatus::Failed("y".into()));
     }
@@ -97,6 +113,14 @@ mod tests {
     #[test]
     fn test_serialization() {
         let status = JobStatus::Failed("disk full".into());
+        let json = serde_json::to_string(&status).expect("serialize failed");
+        let back: JobStatus = serde_json::from_str(&json).expect("deserialize failed");
+        assert_eq!(status, back);
+    }
+
+    #[test]
+    fn test_completed_serialization() {
+        let status = JobStatus::Completed(vec![0, 1, 0]);
         let json = serde_json::to_string(&status).expect("serialize failed");
         let back: JobStatus = serde_json::from_str(&json).expect("deserialize failed");
         assert_eq!(status, back);
