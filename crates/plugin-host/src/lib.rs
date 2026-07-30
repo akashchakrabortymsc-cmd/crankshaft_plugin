@@ -40,3 +40,4 @@ pub mod rpc;
 pub use config::HostConfig;
 pub use error::HostError;
 pub use error::HostResult;
+pub use process::PluginProcess;

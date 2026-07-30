@@ -30,6 +30,13 @@ pub enum HostError {
     #[error("plugin process exited unexpectedly (exit code: {0:?})")]
     ProcessExited(Option<i32>),
 
+    /// An I/O error occurred while managing an already-spawned plugin
+    /// process (waiting on it, checking whether it's still alive, etc.) —
+    /// distinct from [`HostError::Spawn`], which is specifically about the
+    /// initial spawn call failing.
+    #[error("I/O error managing plugin process: {0}")]
+    Process(#[from] io::Error),
+
     /// Something went wrong at the plugin protocol level. See
     /// [`PluginError`] for the specific cases (connection failure, timeout,
     /// malformed response, unknown job, etc.).
@@ -70,6 +77,13 @@ mod tests {
     fn test_process_exited_no_code() {
         let err = HostError::ProcessExited(None);
         assert_eq!(err.to_string(), "plugin process exited unexpectedly (exit code: None)");
+    }
+
+    #[test]
+    fn test_process_io_error_passthrough() {
+        let source = io::Error::new(io::ErrorKind::Other, "no such process");
+        let err: HostError = source.into();
+        assert_eq!(err.to_string(), "I/O error managing plugin process: no such process");
     }
 
     #[test]
