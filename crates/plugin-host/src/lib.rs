@@ -36,3 +36,7 @@ pub mod error;
 pub mod poll;
 pub mod process;
 pub mod rpc;
+
+pub use config::HostConfig;
+pub use error::HostError;
+pub use error::HostResult;
