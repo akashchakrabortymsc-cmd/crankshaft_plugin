@@ -70,20 +70,29 @@ mod tests {
     #[test]
     fn test_process_exited_with_code() {
         let err = HostError::ProcessExited(Some(1));
-        assert_eq!(err.to_string(), "plugin process exited unexpectedly (exit code: Some(1))");
+        assert_eq!(
+            err.to_string(),
+            "plugin process exited unexpectedly (exit code: Some(1))"
+        );
     }
 
     #[test]
     fn test_process_exited_no_code() {
         let err = HostError::ProcessExited(None);
-        assert_eq!(err.to_string(), "plugin process exited unexpectedly (exit code: None)");
+        assert_eq!(
+            err.to_string(),
+            "plugin process exited unexpectedly (exit code: None)"
+        );
     }
 
     #[test]
     fn test_process_io_error_passthrough() {
         let source = io::Error::new(io::ErrorKind::Other, "no such process");
         let err: HostError = source.into();
-        assert_eq!(err.to_string(), "I/O error managing plugin process: no such process");
+        assert_eq!(
+            err.to_string(),
+            "I/O error managing plugin process: no such process"
+        );
     }
 
     #[test]

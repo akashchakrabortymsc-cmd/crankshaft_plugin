@@ -60,7 +60,7 @@ impl RpcRequest {
 }
 
 /// A structured error inside an [`RpcResponse`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RpcErrorObject {
     /// A short, machine-readable error code.
     pub code: String,
@@ -68,19 +68,41 @@ pub struct RpcErrorObject {
     pub message: String,
 }
 
-/// A JSON-RPC response sent between host and plugin.
+/// The outcome of an RPC call: success with a result, or failure with an
+/// error.
 ///
-/// Exactly one of `result`/`error` should be set. That isn't enforced at
-/// the type level — a response with both or neither set should be treated
-/// by the receiver as a malformed response, not matched on blindly.
+/// Tagged explicitly on the wire with a `"status"` field, rather than
+/// inferred from which of two `Option` fields happens to be set. A bare
+/// `Option<Value>` can't survive a JSON round trip and still tell "the call
+/// succeeded and returned `null`" apart from "no result was set" — serde's
+/// `Option<T>` deserializer treats a literal JSON `null` as `None`
+/// regardless of what `T` is. Tagging the variant explicitly sidesteps that
+/// entirely, and as a bonus makes "both set" / "neither set" unrepresentable
+/// instead of something callers have to check for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RpcOutcome {
+    /// The call succeeded.
+    Ok {
+        /// The method's return value. `Value::Null` for methods that
+        /// return nothing on success (e.g. `health_check`, `cancel`).
+        result: Value,
+    },
+    /// The call failed.
+    Error {
+        /// The structured error.
+        error: RpcErrorObject,
+    },
+}
+
+/// A JSON-RPC response sent between host and plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcResponse {
     /// Matches the [`RequestId`] of the request this responds to.
     pub id: RequestId,
-    /// The method's return value, present on success.
-    pub result: Option<Value>,
-    /// The error, present on failure.
-    pub error: Option<RpcErrorObject>,
+    /// Whether the call succeeded or failed, and its payload.
+    #[serde(flatten)]
+    pub outcome: RpcOutcome,
 }
 
 impl RpcResponse {
@@ -88,8 +110,7 @@ impl RpcResponse {
     pub fn ok(id: RequestId, result: Value) -> Self {
         Self {
             id,
-            result: Some(result),
-            error: None,
+            outcome: RpcOutcome::Ok { result },
         }
     }
 
@@ -97,24 +118,23 @@ impl RpcResponse {
     pub fn err(id: RequestId, code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             id,
-            result: None,
-            error: Some(RpcErrorObject {
-                code: code.into(),
-                message: message.into(),
-            }),
+            outcome: RpcOutcome::Error {
+                error: RpcErrorObject {
+                    code: code.into(),
+                    message: message.into(),
+                },
+            },
         }
     }
 
-    /// Whether this response represents a well-formed success: `result` is
-    /// set and `error` is not.
+    /// Whether this response represents success.
     pub fn is_ok(&self) -> bool {
-        self.result.is_some() && self.error.is_none()
+        matches!(self.outcome, RpcOutcome::Ok { .. })
     }
 
-    /// Whether this response represents a well-formed failure: `error` is
-    /// set and `result` is not.
+    /// Whether this response represents failure.
     pub fn is_err(&self) -> bool {
-        self.error.is_some() && self.result.is_none()
+        matches!(self.outcome, RpcOutcome::Error { .. })
     }
 }
 
@@ -143,44 +163,41 @@ mod tests {
 
         assert!(decoded.is_ok());
         assert!(!decoded.is_err());
-        assert_eq!(decoded.result, Some(json!({"job_id": "abc-123"})));
+        assert!(matches!(
+            decoded.outcome,
+            RpcOutcome::Ok { result } if result == json!({"job_id": "abc-123"})
+        ));
+    }
+
+    /// Regression test: this is exactly the case that broke under the old
+    /// `Option<Value>` representation — a successful call whose result is
+    /// JSON `null` (e.g. `health_check`) used to round-trip back as
+    /// `is_ok() == false`.
+    #[test]
+    fn test_response_ok_with_null_result_round_trip() {
+        let response = RpcResponse::ok(RequestId(3), Value::Null);
+        let encoded = serde_json::to_string(&response).unwrap();
+        let decoded: RpcResponse = serde_json::from_str(&encoded).unwrap();
+
+        assert!(decoded.is_ok());
+        assert!(!decoded.is_err());
+        assert!(matches!(decoded.outcome, RpcOutcome::Ok { result } if result == Value::Null));
     }
 
     #[test]
     fn test_response_err_round_trip() {
-        let response = RpcResponse::err(RequestId(3), "job_not_found", "job job-404 not found");
+        let response = RpcResponse::err(RequestId(4), "job_not_found", "job job-404 not found");
         let encoded = serde_json::to_string(&response).unwrap();
         let decoded: RpcResponse = serde_json::from_str(&encoded).unwrap();
 
         assert!(decoded.is_err());
         assert!(!decoded.is_ok());
-        let error = decoded.error.unwrap();
-        assert_eq!(error.code, "job_not_found");
-        assert_eq!(error.message, "job job-404 not found");
-    }
-
-    #[test]
-    fn test_malformed_response_neither_set() {
-        let response = RpcResponse {
-            id: RequestId(4),
-            result: None,
-            error: None,
-        };
-        assert!(!response.is_ok());
-        assert!(!response.is_err());
-    }
-
-    #[test]
-    fn test_malformed_response_both_set() {
-        let response = RpcResponse {
-            id: RequestId(5),
-            result: Some(json!(null)),
-            error: Some(RpcErrorObject {
-                code: "x".into(),
-                message: "y".into(),
-            }),
-        };
-        assert!(!response.is_ok());
-        assert!(!response.is_err());
+        match decoded.outcome {
+            RpcOutcome::Error { error } => {
+                assert_eq!(error.code, "job_not_found");
+                assert_eq!(error.message, "job job-404 not found");
+            }
+            RpcOutcome::Ok { .. } => panic!("expected an error outcome"),
+        }
     }
 }
