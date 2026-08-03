@@ -1,116 +1,129 @@
 # crankshaft-plugin-host
 
-The engine-side crate. `plugin-host` spawns an external plugin process,
-speaks JSON-RPC over TCP to it, and implements Crankshaft's real `Backend`
-trait as an adapter over `crankshaft-plugin-core`'s submit/status/cancel
-model. Nothing calls into this crate except Crankshaft itself; nothing in
-this crate depends on any particular plugin.
+The engine-side half of the Crankshaft plugin system. `plugin-host` spawns a
+plugin as a standalone OS process and talks to it over JSON-RPC/TCP. From
+Crankshaft's point of view, it should eventually look like an ordinary
+`Backend` — everything in this crate exists to make that adapter possible.
+
+Shared vocabulary (`Job`, `JobStatus`, `PluginHandler`, `PluginError`) lives
+in the sibling `plugin-core` crate. The JSON-RPC envelope (`RpcRequest`,
+`RpcResponse`) lives in `plugin-protocol`. Neither of those crates knows
+anything about processes, TCP, or Crankshaft's real `Backend` trait — that's
+this crate's job.
 
 ---
 
-## What this crate does
+## What's here
 
-Crankshaft calls `Backend::run(task, cancellation_token)` on whatever backend
-is configured. For a plugin-backed task, that call needs to:
-
-1. Convert the `Task` into a `Job` (`crankshaft-plugin-core::Job::from_task`).
-2. Get that `Job` to a running plugin process and get a `JobId` back.
-3. Poll the plugin for status until it's terminal, honoring the
-   `CancellationToken` Crankshaft gave us.
-4. Convert the final `JobStatus` back into what `Backend::run` promises to
-   return: `NonEmpty<ExitStatus>` on success, `TaskRunError` otherwise.
-
-`plugin-host` is the code that does all four steps, plus the subprocess
-management (spawning the plugin, knowing when it's ready, noticing if it
-dies) that steps 2–3 depend on.
-
----
-
-## Module layout
-
-- **`backend.rs`** — `PluginBackend`, the actual `impl Backend for
-  PluginBackend`. This is the thing Crankshaft holds a reference to.
-- **`process.rs`** — spawns and supervises the plugin subprocess: startup,
-  readiness detection, crash detection, shutdown.
-- **`rpc/`** — the JSON-RPC-over-TCP layer used to talk to a running plugin:
-  - `message.rs` — request/response wire types for `submit` / `status` /
-    `cancel` / `health_check`.
-  - `transport.rs` — frames those messages over a raw `TcpStream`.
-  - `client.rs` — host-side caller: opens/holds the connection, sends a
-    request, correlates it with its response, surfaces `PluginError`s. The
-    mirror image of plugin-core's `PluginHandler` trait — that's what a
-    *plugin* implements in-process; `Client` is what the *host* calls
-    against a plugin over the wire.
-- **`poll.rs`** — the status-polling loop: calls `Client::status` on an
-  interval until `JobStatus::is_terminal()`, or the task's
-  `CancellationToken` fires.
-- **`config.rs`** — `PluginConfig`: where to find the plugin binary, how to
-  launch it, startup/RPC timeouts. Intended to be the eventual target of
-  Crankshaft's `config.toml` deserialization (roadmap phase 5), even though
-  nothing reads it from a file yet.
-- **`error.rs`** — `PluginHostError`, this crate's error type. Wraps
-  `crankshaft-plugin-core::PluginError` (errors surfaced *by* the plugin) and
-  is meant to map onto `TaskRunError` (what `Backend::run` must return).
+- **`HostConfig`** (`config.rs`) — path to the plugin binary, spawn
+  arguments, connection retry count/delay, poll interval, RPC timeout.
+  Builder-style, with defaults matching the original design plan (5 connect
+  attempts, 500ms apart).
+- **`HostError`** / **`HostResult<T>`** (`error.rs`) — the host's error
+  type. Deliberately thin: `Spawn` (subprocess spawn failure), `Process`
+  (I/O error managing an already-spawned child), `ProcessExited`, and
+  `Plugin(PluginError)` — everything that's really a `plugin-core::PluginError`
+  (connection failures, timeouts, malformed responses, unknown jobs) is
+  passed through rather than re-invented here.
+- **`PluginProcess`** (`process.rs`) — wraps `tokio::process::Child` with
+  `kill_on_drop(true)` set unconditionally, so a dropped handle never
+  leaves a zombie plugin process behind. Owns only the process lifecycle
+  (`spawn`/`try_wait`/`wait`/`kill`) — no networking, no RPC.
+- **`rpc`** — the JSON-RPC/TCP client, split into two layers:
+  - **`rpc::transport::RpcTransport`** — wire mechanics only: newline-delimited
+    JSON framing (`tokio_util::codec::LinesCodec`), request/response id
+    correlation, envelope decoding. Knows nothing about jobs; a well-formed
+    error response comes back as a raw `RpcErrorObject`, not a `PluginError`.
+  - **`rpc::client::RpcClient`** — the plugin-protocol vocabulary
+    (`submit`/`status`/`cancel`/`health_check`), built on `RpcTransport`.
+    Maps error codes to `PluginError` variants, using the caller's own
+    `JobId` to build a proper `PluginError::JobNotFound` (the wire error
+    object doesn't carry one).
+- **`poll`** (`poll.rs`) — two independent loops:
+  - `connect_with_retry` — retries connecting to the plugin's TCP listener
+    after spawn, since it needs a moment to bind.
+  - `poll_until_terminal` — repeatedly checks a job's status until it's
+    done. Deliberately has no cancellation logic of its own; a caller that
+    needs to race this against a `CancellationToken` wraps the call in
+    `tokio::select!` instead.
+- **`backend`** — not yet implemented. Will be the actual adapter:
+  `impl Backend for PluginBackend`, converting `Task` → `Job`, submitting,
+  polling, and building `NonEmpty<ExitStatus>` on completion. See
+  [What's next](#whats-next).
 
 ---
 
-## Open design questions
+## Design decisions worth knowing about
 
-These are genuinely undecided, not implementation detail to fill in later —
-they shape the module boundaries above:
-
-1. **Transport crate.** Hand-rolled framing over `tokio::net::TcpStream` +
-   `serde_json`, vs pulling in `jsonrpsee`. Leaning hand-rolled — the surface
-   area is four methods — but not committed.
-2. **Framing strategy**, if hand-rolled: newline-delimited JSON vs
-   length-prefixed frames.
-3. **Readiness handshake.** How does the host know the plugin's TCP listener
-   is up before it tries to connect — fixed delay, a ready-signal on stdout,
-   or connect-with-backoff up to `startup_timeout`?
-4. **Port assignment.** Host-assigned (passed to the plugin via arg/env) vs
-   plugin-chosen-and-reported.
-5. **Crash detection mid-flight.** Does something watch the child process
-   concurrently with RPC calls, so an in-flight `submit`/`status` fails fast
-   with a clear error instead of hanging on a dead socket?
-6. **`PluginBackend` lifecycle.** One `PluginBackend` = one already-spawned,
-   already-connected plugin process (construct once, `run()` many times,
-   mirroring how `crankshaft-docker`'s `Backend for Docker` holds one shared
-   client) — or spawn/connect per task? Needs a full read of
-   `crankshaft-docker`'s actual `Backend` impl to confirm the pattern.
-7. **`PluginError` serialization.** It currently derives `PartialEq` but not
-   `Serialize`/`Deserialize` — needs one or the other (or a wire-safe mirror
-   type) before `Response::Err` can round-trip over JSON-RPC.
-
-These are also the questions worth getting Clay's take on once there's
-something concrete to show him, same as the timeout/`.expect()` questions
-from plugin-core.
+- **Framing: newline-delimited JSON, not length-prefixed.** Simpler, and
+  JSON strings escape embedded newlines, so it's safe. Can be swapped for
+  `tokio_util::codec::LengthDelimitedCodec` later without touching anything
+  above the transport layer.
+- **`RpcResponse` uses a tagged `RpcOutcome` enum, not two `Option` fields.**
+  The original design (`result: Option<Value>`, `error: Option<Value>`) had
+  a real bug: a successful response whose result was JSON `null` (e.g.
+  `health_check`) round-tripped back indistinguishable from "no result set
+  at all," because serde's `Option<T>` deserializer treats a literal `null`
+  as `None` regardless of `T`. `plugin-protocol::RpcOutcome` tags the
+  variant explicitly on the wire (`"status": "ok" | "error"`), which also
+  makes "both set" / "neither set" unrepresentable instead of something
+  every caller has to check for.
+- **Host connects out to the plugin, not the other way around.** The
+  original planning notes are inconsistent on this point — one bullet says
+  the host listens and the plugin connects in, another describes a
+  host-side connection *retry* loop, which only makes sense if the plugin
+  is the one listening. This crate is built on the second reading, since
+  `HostConfig`'s retry/delay fields and `poll::connect_with_retry` only make
+  sense that way. **Still open:** how the host learns which port the
+  plugin bound to (fixed/pre-agreed port vs. the plugin reporting it back
+  somehow) hasn't been decided — needs an answer before `process.rs` and
+  `poll.rs` can be wired together end-to-end.
 
 ---
 
-## Dependencies of note
+## Test Results
 
-- **`crankshaft-plugin-core`** (path dependency) — `Job`, `JobId`,
-  `JobStatus`, `PluginError`, `PluginHandler`. This crate is the consumer of
-  everything plugin-core defines.
-- **`crankshaft-engine`** (git dependency) — the real `Backend` trait and
-  `Task`/`TaskRunError` types this crate implements against, not a
-  hand-mirrored approximation.
-- **`tokio`** — process spawning, TCP, async runtime.
-- **JSON-RPC transport dependency** — not yet added; see open question 1.
+| Module | Test | Result |
+|---|---|---|
+| `config` | `test_new_defaults` | ✅ pass |
+| `config` | `test_builder_chain` | ✅ pass |
+| `error` | `test_spawn_message` | ✅ pass |
+| `error` | `test_process_exited_with_code` | ✅ pass |
+| `error` | `test_process_exited_no_code` | ✅ pass |
+| `error` | `test_process_io_error_passthrough` | ✅ pass |
+| `error` | `test_plugin_error_passthrough` | ✅ pass |
+| `process` | `test_spawn_and_wait_success` | ✅ pass |
+| `process` | `test_try_wait_before_exit` | ✅ pass |
+| `process` | `test_kill` | ✅ pass |
+| `process` | `test_spawn_missing_binary_returns_error` | ✅ pass |
+| `rpc::transport` | `test_call_success` | ✅ pass |
+| `rpc::transport` | `test_call_returns_raw_error_object` | ✅ pass |
+| `rpc::transport` | `test_response_id_mismatch_is_invalid_response` | ✅ pass |
+| `rpc::transport` | `test_malformed_response_is_invalid_response` | ✅ pass |
+| `rpc::transport` | `test_connection_closed_before_response` | ✅ pass |
+| `rpc::client` | `test_submit_success` | ✅ pass |
+| `rpc::client` | `test_status_job_not_found` | ✅ pass |
+| `rpc::client` | `test_health_check_success` | ✅ pass |
+| `rpc::client` | `test_cancel_unknown_error_code_falls_back_to_unknown` | ✅ pass |
+| `poll` | `test_connect_with_retry_succeeds_immediately` | ✅ pass |
+| `poll` | `test_connect_with_retry_succeeds_after_delay` | ✅ pass |
+| `poll` | `test_connect_with_retry_gives_up` | ✅ pass |
+| `poll` | `test_poll_until_terminal_returns_first_terminal_status` | ✅ pass |
+
+24/24 passing, zero warnings.
 
 ---
 
 ## Status
 
-**🚧 Scaffolded, not implemented.** Module structure and type signatures are
-in place (`backend.rs`, `config.rs`, `error.rs`, `process.rs`, `poll.rs`,
-`rpc/{mod,message,transport,client}.rs`); function bodies are `todo!()`
-pending the design decisions above. Depends on `plugin-core` being finalized
-(pending Clay's review — see that crate's README).
+**🚧 In progress.** `config`, `error`, `process`, `rpc` (transport + client),
+and `poll` are implemented and tested. `backend` — the actual `Backend`
+trait adapter, and the crux of this crate — has not been started.
 
-### What's next
+### What's done
 
-Resolve the open design questions above, starting with a full read of
-`crankshaft-docker`'s `Backend for Docker` implementation (currently we've
-only seen the trait signature) — that answers questions 3, 4, and 6 by
-example rather than by guessing.
+Everything below `Backend` is in place: spawning the plugin subprocess with
+`kill_on_drop`, connecting to it with retries, speaking JSON-RPC over a
+newline-delimited TCP transport, mapping wire errors back to `PluginError`,
+and polling a job's status to completion.
+
