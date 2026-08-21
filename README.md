@@ -1,6 +1,6 @@
 # crankshaft-plugin
 
-A production-oriented plugin architecture for [Crankshaft](https://github.com/stjude-rust-labs/crankshaft) that enables external execution backends to be developed, distributed, and maintained independently from the core engine.
+A production-oriented plugin architecture for [Crankshaft](https://github.com/stjude-rust-labs/crankshaft) that enables external execution backends to be developed, distributed, and maintained independently from the core engine
 
 > **Status:** 🚧 Early Development — Part 1 (`plugin-host`) in progress.
  
